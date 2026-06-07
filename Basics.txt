@@ -1,0 +1,56 @@
+To Enter MYSQL
+--------------
+docker exec -it mysql mysql -uroot -proot
+USE dentaldb;
+
+FLink sql
+---------
+docker exec -it jobmanager ./bin/sql-client.sh
+
+CREATE TABLE appointments (
+    appointment_id INT,
+    patient_id INT,
+    dentist_id INT,
+    amount DOUBLE,
+    status STRING,
+    created_at TIMESTAMP_LTZ(3),
+    PRIMARY KEY (appointment_id) NOT ENFORCED
+)
+WITH (
+    'connector' = 'kafka',
+    'topic' = 'dental.dentaldb.appointments',
+    'properties.bootstrap.servers' = 'kafka:9092',
+    'properties.group.id' = 'flink-group',
+    'scan.startup.mode' = 'earliest-offset',
+    'format' = 'debezium-json',
+    'debezium-json.timestamp-format.standard' = 'ISO-8601'
+);
+
+INSERT INTO appointments(
+    patient_id,
+    dentist_id,
+    amount,
+    status
+)
+VALUES(
+    1,
+    1,
+    500,
+    'COMPLETED'
+);
+docker compose down
+docker compose up -d
+
+
+
+Register the connector debezium
+-------------------------------
+./debezium/register_connector.sh
+
+
+problem faced
+-------------
+s23b54@Server-2:~/dental_pipeline/flink$ docker exec jobmanager ls -lh /opt/flink/lib | grep kafka
+-rw-r--r-- 1 root  root  5.4M Apr 22  2024 flink-sql-connector-kafka.jar
+s23b54@Server-2:~/dental_pipeline/flink$ docker exec taskmanager ls -lh /opt/flink/lib | grep kafka
+-rw-r--r-- 1 root  root  5.4M Apr 22  2024 flink-sql-connector-kafka.jar
