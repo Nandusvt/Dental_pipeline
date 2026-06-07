@@ -1,0 +1,126 @@
+DENTAL PIPELINE RUNBOOK
+
+Architecture
+
+MySQL -> Debezium -> Kafka -> Flink
+
+1. Start Everything
+
+cd ~/dental_pipeline docker compose up -d
+
+Verify: docker ps
+
+Expected containers: - mysql - zookeeper - kafka - kafka-ui - connect -
+jobmanager - taskmanager
+
+2. Verify MySQL
+
+docker exec -it mysql mysql -uroot -proot
+
+SHOW DATABASES; USE dentaldb; SHOW TABLES;
+
+Expected: - patients - dentists - appointments
+
+3. Verify Debezium
+
+curl http://localhost:8083/connectors
+
+Expected: [“mysql-dental”]
+
+Check status: curl http://localhost:8083/connectors/mysql-dental/status
+
+4. Verify Kafka Topics
+
+docker exec -it kafka kafka-topics
+–bootstrap-server kafka:9092
+–list
+
+Expected: - dental.dentaldb.patients - dental.dentaldb.dentists -
+dental.dentaldb.appointments
+
+5. Kafka UI
+
+Open: http://localhost:8081
+
+Verify topics exist.
+
+6. Test CDC
+
+INSERT INTO appointments( patient_id, dentist_id, amount, status )
+VALUES( 1, 1, 999.99, ‘COMPLETED’ );
+
+Refresh Kafka UI and verify message count increases.
+
+7. Flink Dashboard
+
+Open: http://localhost:8082
+
+Initially: Running Jobs = 0
+
+8. Open Flink SQL Client
+
+docker exec -it jobmanager ./bin/sql-client.sh
+
+9. Create Appointments Table
+
+CREATE TABLE appointments ( appointment_id INT, patient_id INT,
+dentist_id INT, amount DOUBLE, status STRING, created_at TIMESTAMP(3),
+PRIMARY KEY (appointment_id) NOT ENFORCED ) WITH ( ‘connector’=‘kafka’,
+‘topic’=‘dental.dentaldb.appointments’,
+‘properties.bootstrap.servers’=‘kafka:9092’,
+‘properties.group.id’=‘flink-group’,
+‘scan.startup.mode’=‘earliest-offset’, ‘format’=‘debezium-json’ );
+
+10. Create Patients Table
+
+CREATE TABLE patients ( patient_id INT, patient_name STRING, city
+STRING, PRIMARY KEY (patient_id) NOT ENFORCED ) WITH (
+‘connector’=‘kafka’, ‘topic’=‘dental.dentaldb.patients’,
+‘properties.bootstrap.servers’=‘kafka:9092’,
+‘properties.group.id’=‘flink-group’,
+‘scan.startup.mode’=‘earliest-offset’, ‘format’=‘debezium-json’ );
+
+11. Create Dentists Table
+
+CREATE TABLE dentists ( dentist_id INT, dentist_name STRING,
+specialization STRING, PRIMARY KEY (dentist_id) NOT ENFORCED ) WITH (
+‘connector’=‘kafka’, ‘topic’=‘dental.dentaldb.dentists’,
+‘properties.bootstrap.servers’=‘kafka:9092’,
+‘properties.group.id’=‘flink-group’,
+‘scan.startup.mode’=‘earliest-offset’, ‘format’=‘debezium-json’ );
+
+12. Verify Streaming Data
+
+SELECT * FROM appointments;
+
+13. Create Print Sink
+
+CREATE TABLE revenue_sink ( dentist_id INT, revenue DOUBLE ) WITH (
+‘connector’=‘print’ );
+
+14. Start Continuous Aggregation
+
+INSERT INTO revenue_sink SELECT dentist_id, SUM(amount) FROM
+appointments GROUP BY dentist_id;
+
+15. Observe Flink Dashboard
+
+Refresh: http://localhost:8082
+
+Expected: Running Jobs = 1
+
+Job Graph: Kafka Source -> Aggregation -> Print Sink
+
+16. Test Real-Time Updates
+
+INSERT INTO appointments( patient_id, dentist_id, amount, status )
+VALUES( 2, 1, 500, ‘COMPLETED’ );
+
+View sink output: docker logs taskmanager -f
+
+Pipeline Summary
+
+✓ MySQL ✓ Debezium CDC ✓ Kafka ✓ Kafka UI ✓ Flink SQL ✓ Real-time
+Aggregations ✓ Flink Dashboard
+
+Next Phase: Flink -> Doris -> Grafana/Superset
